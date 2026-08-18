@@ -24,7 +24,7 @@ jobs:
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=14.0 \
-            -fobjc-arc -dynamiclib \
+            -fobjc-arc -dynamiclib -O2 -Wno-unused-function \
             -framework UIKit -framework Foundation \
             -o RenderScale.dylib render_scan.m
           file RenderScale.dylib
