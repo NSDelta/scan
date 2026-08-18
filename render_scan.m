@@ -33,7 +33,7 @@ static int log_len = 0;
 static const uint8_t *g_text = NULL;
 static uint64_t g_vm_base = 0;
 
-static void logf(const char *fmt, ...) {
+static void RSLog(const char *fmt, ...) {
     if (log_len >= MAX_LOG - 300) return;
     va_list args;
     va_start(args, fmt);
@@ -64,9 +64,9 @@ static void read_patch_config(int *indices, int *count) {
     NSString *content = [NSString stringWithContentsOfFile:cfgPath encoding:NSUTF8StringEncoding error:NULL];
     if (!content) return;
     for (NSString *line in [content componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
-        line = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-        if (line.length == 0) continue;
-        int idx = line.intValue;
+        __strong NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (trimmed.length == 0) continue;
+        int idx = trimmed.intValue;
         if (indices && *count < MAX_HITS) indices[(*count)++] = idx;
     }
 }
@@ -88,7 +88,7 @@ static void scan_text(uint64_t slide, const uint8_t *header_base) {
                         const uint64_t vm_base = sect[s].addr;
                         g_text = text;
                         g_vm_base = vm_base;
-                        logf("[RS] __text @ %p size=0x%llx\n", text, text_size);
+                        RSLog("[RS] __text @ %p size=0x%llx\n", text, text_size);
 
                         // 模式2: 紧邻 STR-S 对 (k=1 相邻)
                         for (uint64_t off = 0; off + 12 < text_size; off += 4) {
@@ -116,7 +116,7 @@ static void scan_text(uint64_t slide, const uint8_t *header_base) {
                                 }
                             }
                         }
-                        logf("[RS] adjacent STR-S pairs (k<=4): %d\n", hit_count);
+                        RSLog("[RS] adjacent STR-S pairs (k<=4): %d\n", hit_count);
                         return;
                     }
                 }
@@ -133,7 +133,7 @@ static void patch_hits(uint64_t slide) {
     int count = 0;
     read_patch_config(indices, &count);
     if (count == 0) {
-        logf("[RS] no render_scale_patch.txt -> scan only\n");
+        RSLog("[RS] no render_scale_patch.txt -> scan only\n");
         return;
     }
     for (int i = 0; i < count; i++) {
@@ -144,10 +144,10 @@ static void patch_hits(uint64_t slide) {
             mprotect((void *)page, 0x4000, PROT_READ | PROT_WRITE | PROT_EXEC);
             uint32_t orig = *(uint32_t *)runtime;
             *(uint32_t *)runtime = 0xD503201F; // NOP
-            logf("[RS] PATCHED #%d vm=0x%llx STR S->[X,#0x%x] orig=0x%08x\n",
+            RSLog("[RS] PATCHED #%d vm=0x%llx STR S->[X,#0x%x] orig=0x%08x\n",
                  idx, hit_vm[idx], hit_imm[idx], orig);
         } else {
-            logf("[RS] WARN invalid patch idx %d (0-%d)\n", idx, hit_count-1);
+            RSLog("[RS] WARN invalid patch idx %d (0-%d)\n", idx, hit_count-1);
         }
     }
 }
@@ -158,7 +158,7 @@ static int frame_count = 0;
 static void hooked_displayTimerDraw(id self, SEL _cmd) {
     if (orig_displayTimerDraw) orig_displayTimerDraw(self, _cmd);
     if (frame_count++ < 3) {
-        logf("[RS] frame %d\n", frame_count);
+        RSLog("[RS] frame %d\n", frame_count);
     }
 }
 
@@ -169,7 +169,7 @@ static void log_buf_write(NSString *path) {
 
 __attribute__((constructor))
 static void init(void) {
-    logf("[RS] render-scale dylib v4 loaded pid=%d\n", getpid());
+    RSLog("[RS] render-scale dylib v5 loaded pid=%d\n", getpid());
 
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
         const char *name = _dyld_get_image_name(i);
@@ -177,12 +177,12 @@ static void init(void) {
         const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(i);
         if (!header || header->magic != MH_MAGIC_64) continue;
         const uintptr_t slide = _dyld_get_image_vmaddr_slide(i);
-        logf("[RS] main image=%s slide=0x%lx\n", name, slide);
+        RSLog("[RS] main image=%s slide=0x%lx\n", name, slide);
         scan_text(slide, (const uint8_t *)header);
         // 输出候选列表 (标注 FMOV #1.0 特征)
         for (int h = 0; h < hit_count; h++) {
             int fm = has_fmov_one_before(hit_vm[h] - g_vm_base);
-            logf("[RS]   #%d: vm=0x%llx STR S->[X%d,#0x%x] + [X%d,#0x%x] (file_off=0x%llx) %s\n",
+            RSLog("[RS]   #%d: vm=0x%llx STR S->[X%d,#0x%x] + [X%d,#0x%x] (file_off=0x%llx) %s\n",
                  h, hit_vm[h], hit_rn[h], hit_imm[h], hit_rn[h], hit_imm2[h],
                  hit_vm[h], fm ? "<-- FMOV#1.0 nearby" : "");
         }
@@ -197,9 +197,9 @@ static void init(void) {
         if (m) {
             orig_displayTimerDraw = (void (*)(id, SEL))method_getImplementation(m);
             method_setImplementation(m, (IMP)hooked_displayTimerDraw);
-            logf("[RS] hooked _displayTimerDraw\n");
+            RSLog("[RS] hooked _displayTimerDraw\n");
         } else {
-            logf("[RS] WARN no _displayTimerDraw\n");
+            RSLog("[RS] WARN no _displayTimerDraw\n");
         }
     }
 
